@@ -60,8 +60,20 @@ const WhatsAppConnect: React.FC<WhatsAppConnectProps> = ({ serverUrl }) => {
                         messages: []
                     };
                 }
-                updatedChats[phoneNumber].messages = [...updatedChats[phoneNumber].messages, message];
-                updatedChats[phoneNumber].lastMessage = message;
+
+                // Проверяем, нет ли уже сообщения с таким же временем и текстом
+                const messageExists = updatedChats[phoneNumber].messages.some(
+                    existingMsg => 
+                        existingMsg.body === message.body && 
+                        existingMsg.fromMe === message.fromMe &&
+                        Math.abs(new Date(existingMsg.timestamp).getTime() - new Date(message.timestamp).getTime()) < 1000
+                );
+
+                if (!messageExists) {
+                    updatedChats[phoneNumber].messages = [...updatedChats[phoneNumber].messages, message];
+                    updatedChats[phoneNumber].lastMessage = message;
+                }
+                
                 return updatedChats;
             });
         });
@@ -88,6 +100,15 @@ const WhatsAppConnect: React.FC<WhatsAppConnectProps> = ({ serverUrl }) => {
     const handleSendMessage = async () => {
         if (!activeChat || !message) return;
 
+        const sentMessage: WhatsAppMessage = {
+            from: 'me',
+            to: activeChat,
+            body: message,
+            timestamp: new Date().toISOString(),
+            isGroup: false,
+            fromMe: true
+        };
+
         try {
             const response = await fetch(`${serverUrl}/send-message`, {
                 method: 'POST',
@@ -107,20 +128,22 @@ const WhatsAppConnect: React.FC<WhatsAppConnectProps> = ({ serverUrl }) => {
                 throw new Error(data.error || 'Ошибка при отправке сообщения');
             }
 
-            const sentMessage: WhatsAppMessage = {
-                from: 'me',
-                to: activeChat,
-                body: message,
-                timestamp: new Date().toISOString(),
-                isGroup: false,
-                fromMe: true
-            };
-
+            // Добавляем сообщение только если оно успешно отправлено
             setChats(prevChats => {
                 const updatedChats = { ...prevChats };
                 if (updatedChats[activeChat]) {
-                    updatedChats[activeChat].messages = [...updatedChats[activeChat].messages, sentMessage];
-                    updatedChats[activeChat].lastMessage = sentMessage;
+                    // Проверяем, нет ли уже такого сообщения
+                    const messageExists = updatedChats[activeChat].messages.some(
+                        existingMsg => 
+                            existingMsg.body === sentMessage.body && 
+                            existingMsg.fromMe === sentMessage.fromMe &&
+                            Math.abs(new Date(existingMsg.timestamp).getTime() - new Date(sentMessage.timestamp).getTime()) < 1000
+                    );
+
+                    if (!messageExists) {
+                        updatedChats[activeChat].messages = [...updatedChats[activeChat].messages, sentMessage];
+                        updatedChats[activeChat].lastMessage = sentMessage;
+                    }
                 }
                 return updatedChats;
             });
@@ -145,7 +168,7 @@ const WhatsAppConnect: React.FC<WhatsAppConnectProps> = ({ serverUrl }) => {
                 {/* Заголовок с профилем */}
                 <div className="h-[60px] bg-[#f0f2f5] px-4 flex items-center justify-between border-r border-[#d1d7db]">
                     <div className="flex items-center">
-                        <div className="w-10 h-10 rounded-full bg-gray-300 flex items-center justify-center">
+                        <div className="w-10 h-10 rounded-full bg-gray-300 flex-shrink-0 flex items-center justify-center">
                             <svg className="w-6 h-6 text-gray-600" fill="currentColor" viewBox="0 0 24 24">
                                 <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z" />
                             </svg>
