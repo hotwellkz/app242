@@ -7,14 +7,22 @@ interface WhatsAppConnectProps {
     serverUrl: string;
 }
 
+interface Chat {
+    phoneNumber: string;
+    name: string;
+    lastMessage?: WhatsAppMessage;
+    messages: WhatsAppMessage[];
+}
+
 const WhatsAppConnect: React.FC<WhatsAppConnectProps> = ({ serverUrl }) => {
     const [socket, setSocket] = useState<Socket | null>(null);
     const [qrCode, setQrCode] = useState<string>('');
     const [isQrScanned, setIsQrScanned] = useState<boolean>(false);
     const [status, setStatus] = useState<string>('Подключение...');
-    const [phoneNumber, setPhoneNumber] = useState<string>('');
     const [message, setMessage] = useState<string>('');
-    const [messages, setMessages] = useState<WhatsAppMessage[]>([]);
+    const [chats, setChats] = useState<{ [key: string]: Chat }>({});
+    const [activeChat, setActiveChat] = useState<string | null>(null);
+    const [searchQuery, setSearchQuery] = useState<string>('');
 
     useEffect(() => {
         const newSocket = io(serverUrl, {
@@ -41,7 +49,21 @@ const WhatsAppConnect: React.FC<WhatsAppConnectProps> = ({ serverUrl }) => {
 
         newSocket.on('whatsapp-message', (message: WhatsAppMessage) => {
             console.log('Получено новое сообщение:', message);
-            setMessages(prev => [...prev, message]);
+            const phoneNumber = message.fromMe ? message.to : message.from;
+            
+            setChats(prevChats => {
+                const updatedChats = { ...prevChats };
+                if (!updatedChats[phoneNumber]) {
+                    updatedChats[phoneNumber] = {
+                        phoneNumber,
+                        name: message.sender || phoneNumber,
+                        messages: []
+                    };
+                }
+                updatedChats[phoneNumber].messages = [...updatedChats[phoneNumber].messages, message];
+                updatedChats[phoneNumber].lastMessage = message;
+                return updatedChats;
+            });
         });
 
         newSocket.on('disconnected', () => {
@@ -64,10 +86,7 @@ const WhatsAppConnect: React.FC<WhatsAppConnectProps> = ({ serverUrl }) => {
     }, [serverUrl]);
 
     const handleSendMessage = async () => {
-        if (!phoneNumber || !message) {
-            alert('Пожалуйста, заполните номер телефона и сообщение');
-            return;
-        }
+        if (!activeChat || !message) return;
 
         try {
             const response = await fetch(`${serverUrl}/send-message`, {
@@ -77,7 +96,7 @@ const WhatsAppConnect: React.FC<WhatsAppConnectProps> = ({ serverUrl }) => {
                 },
                 credentials: 'include',
                 body: JSON.stringify({
-                    phoneNumber,
+                    phoneNumber: activeChat,
                     message,
                 }),
             });
@@ -88,22 +107,36 @@ const WhatsAppConnect: React.FC<WhatsAppConnectProps> = ({ serverUrl }) => {
                 throw new Error(data.error || 'Ошибка при отправке сообщения');
             }
 
-            // Добавляем отправленное сообщение в список
             const sentMessage: WhatsAppMessage = {
                 from: 'me',
+                to: activeChat,
                 body: message,
                 timestamp: new Date().toISOString(),
                 isGroup: false,
                 fromMe: true
             };
-            setMessages(prev => [...prev, sentMessage]);
+
+            setChats(prevChats => {
+                const updatedChats = { ...prevChats };
+                if (updatedChats[activeChat]) {
+                    updatedChats[activeChat].messages = [...updatedChats[activeChat].messages, sentMessage];
+                    updatedChats[activeChat].lastMessage = sentMessage;
+                }
+                return updatedChats;
+            });
 
             setMessage('');
-            setPhoneNumber('');
         } catch (error) {
             alert('Ошибка при отправке сообщения: ' + error);
         }
     };
+
+    const filteredChats = Object.values(chats).filter(chat => 
+        chat.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        chat.phoneNumber.includes(searchQuery)
+    );
+
+    const activeChatMessages = activeChat ? chats[activeChat]?.messages || [] : [];
 
     return (
         <div className="flex h-screen bg-[#f0f2f5]">
@@ -126,7 +159,7 @@ const WhatsAppConnect: React.FC<WhatsAppConnectProps> = ({ serverUrl }) => {
                         </button>
                         <button className="p-2 hover:bg-gray-100 rounded-full">
                             <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-                                <path d="M19.43 12.98c.04-.32.07-.64.07-.98s-.03-.66-.07-.98l2.11-1.65c.19-.15.24-.42.12-.64l-2-3.46c-.12-.22-.39-.3-.61-.22l-2.49 1c-.52-.4-1.08-.73-1.69-.98l-.38-2.65C14.46 2.18 14.25 2 14 2h-4c-.25 0-.46.18-.49.42l-.38 2.65c-.61.25-1.17.59-1.69.98l-2.49-1c-.23-.09-.49 0-.61.22l-2 3.46c-.13.22-.07.49.12.64l2.11 1.65c-.04.32-.07.65-.07.98s.03.66.07.98l-2.11 1.65c-.19.15-.24.42-.12.64l2 3.46c.12.22.39.3.61.22l2.49-1c.52.4 1.08.73 1.69.98l.38 2.65c.03.24.24.42.49.42h4c.25 0 .46-.18.49-.42l.38-2.65c.61-.25 1.17-.59 1.69-.98l2.49 1c.23.09.49 0 .61-.22l2-3.46c.12-.22.07-.49-.12-.64l-2.11-1.65zM12 15.5c-1.93 0-3.5-1.57-3.5-3.5s1.57-3.5 3.5-3.5 3.5 1.57 3.5 3.5-1.57 3.5-3.5 3.5z" />
+                                <path d="M19.43 12.98c.04-.32.07-.64.07-.98s-.03-.66-.07-.98l2.11-1.65c.19-.15.24-.42.12-.64l-2-3.46c-.12-.22-.39-.3-.61-.22l-2.49 1c-.52-.4-1.08-.73-1.69-.98l-.38-2.65C14.46 2.18 14.25 2 14 2h-4c-.25 0-.46.18-.49.42l-.38 2.65c-.61.25-1.17.59-1.69.98l-2.49 1c-.23-.09-.49 0-.61.22l-2 3.46c-.13.22-.07.49.12.64l2.11 1.65c-.04.32-.07.65-.07.98s.03.66.07.98l-2.11 1.65c-.19.15-.24.42-.12.64l2 3.46c.12.22.39.3.61.22l2.49-1c.52.4 1.08.73 1.69.98l.38 2.65c.03.24.24.42.49.42h4c.25 0 .46-.18.49-.42l.38-2.65c.61-.25 1.17-.59 1.69-.98l2.49 1c.23.09.49 0 .61-.22l2-3.46c.12-.22.07-.49-.12-.64l-2.11-1.65zM12 15.5c-1.93 0-3.5-1.57-3.5-3.5s1.57-3.5 3.5-3.5 3.5 1.57 3.5 3.5-1.57 3.5-3.5 3.5z" />
                             </svg>
                         </button>
                     </div>
@@ -140,6 +173,8 @@ const WhatsAppConnect: React.FC<WhatsAppConnectProps> = ({ serverUrl }) => {
                         </svg>
                         <input 
                             type="text" 
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
                             placeholder="Поиск или новый чат" 
                             className="bg-transparent w-full p-2 outline-none text-[#54656f]"
                         />
@@ -149,10 +184,13 @@ const WhatsAppConnect: React.FC<WhatsAppConnectProps> = ({ serverUrl }) => {
                 {/* Список чатов */}
                 <div className="flex-1 overflow-y-auto bg-white">
                     <div className="py-2">
-                        {messages.map((msg, index) => (
+                        {filteredChats.map((chat) => (
                             <div 
-                                key={index}
-                                className="px-3 py-3 flex items-center hover:bg-[#f0f2f5] cursor-pointer"
+                                key={chat.phoneNumber}
+                                onClick={() => setActiveChat(chat.phoneNumber)}
+                                className={`px-3 py-3 flex items-center hover:bg-[#f0f2f5] cursor-pointer ${
+                                    activeChat === chat.phoneNumber ? 'bg-[#f0f2f5]' : ''
+                                }`}
                             >
                                 <div className="w-12 h-12 rounded-full bg-gray-300 flex-shrink-0 flex items-center justify-center">
                                     <svg className="w-6 h-6 text-gray-600" fill="currentColor" viewBox="0 0 24 24">
@@ -162,13 +200,19 @@ const WhatsAppConnect: React.FC<WhatsAppConnectProps> = ({ serverUrl }) => {
                                 <div className="ml-3 flex-1">
                                     <div className="flex justify-between items-center">
                                         <span className="font-medium text-[#111b21]">
-                                            {msg.fromMe ? 'Вы' : (msg.sender || msg.from)}
+                                            {chat.name}
                                         </span>
-                                        <span className="text-xs text-[#667781]">
-                                            {new Date(msg.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
-                                        </span>
+                                        {chat.lastMessage && (
+                                            <span className="text-xs text-[#667781]">
+                                                {new Date(chat.lastMessage.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                                            </span>
+                                        )}
                                     </div>
-                                    <p className="text-sm text-[#667781] truncate">{msg.body}</p>
+                                    {chat.lastMessage && (
+                                        <p className="text-sm text-[#667781] truncate">
+                                            {chat.lastMessage.fromMe ? 'Вы: ' : ''}{chat.lastMessage.body}
+                                        </p>
+                                    )}
                                 </div>
                             </div>
                         ))}
@@ -234,7 +278,7 @@ const WhatsAppConnect: React.FC<WhatsAppConnectProps> = ({ serverUrl }) => {
                         {/* Область сообщений */}
                         <div className="flex-1 overflow-y-auto p-8" style={{backgroundImage: 'url("/whatsapp-bg.png")'}}>
                             <div className="space-y-4">
-                                {messages.map((msg, index) => (
+                                {activeChatMessages.map((msg, index) => (
                                     <div
                                         key={index}
                                         className={`flex ${msg.fromMe ? 'justify-end' : 'justify-start'}`}
@@ -273,13 +317,14 @@ const WhatsAppConnect: React.FC<WhatsAppConnectProps> = ({ serverUrl }) => {
                                     type="text"
                                     value={message}
                                     onChange={(e) => setMessage(e.target.value)}
-                                    placeholder="Введите сообщение"
+                                    placeholder={activeChat ? "Введите сообщение" : "Выберите чат для отправки сообщения"}
                                     className="w-full outline-none text-[#111b21]"
+                                    disabled={!activeChat}
                                 />
                             </div>
                             <button 
                                 onClick={handleSendMessage}
-                                disabled={!message}
+                                disabled={!activeChat || !message}
                                 className="p-2 text-[#54656f] hover:bg-gray-100 rounded-full disabled:opacity-50"
                             >
                                 <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
